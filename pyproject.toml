@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ase-flow"
+version = "0.1"
+description = "ASE workflows"
+authors = [
+    { name = "Wei", email = "wei.chen@uclouvain.be" }
+]
+dependencies = [
+    "ase",
+    "jobflow",
+    "pymatgen",
+    "monty",
+    "fireworks",
+    "pymongo",
+    "mace-torch"
+]
+requires-python = ">=3.8"
+
+[project.optional-dependencies]
+dev = ["black", "isort", "pytest"]
