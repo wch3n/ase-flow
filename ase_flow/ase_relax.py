@@ -3,6 +3,7 @@ from ase import Atoms
 from ase.optimize import BFGS, FIRE
 from ase.io import read, write
 from pymatgen.io.ase import AseAtomsAdaptor
+from ase_flow.vibrations import calc_free_energy
 import os, socket
 
 def mace_calculator(atoms, model):
@@ -23,7 +24,7 @@ def orb_calculator(atoms, model):
     return atoms
 
 @job
-def relax_ase(path_to_structure="POSCAR", atoms=None, forcefield="mace", model=None, alias=''):
+def relax_ase(path_to_structure="POSCAR", atoms=None, forcefield="mace", model=None, alias='', free_energy=True, mode_fe='harmonic'):
     if atoms is not None:
         atoms = AseAtomsAdaptor.get_atoms(atoms)
     else:
@@ -53,6 +54,11 @@ def relax_ase(path_to_structure="POSCAR", atoms=None, forcefield="mace", model=N
         "energy_per_atom": energy / len(final_structure)
         }
     }
+
+    if free_energy:
+        free_energy = calc_free_energy(atoms, temperature=298.15, pressure = 101325, mode=mode_fe, 
+            geometry='nonlinear', symmetrynumber=2, spin=0)
+        output["output"]["free_energy"] = free_energy    
 
     results = {
         "dir_name": f"{socket.gethostname()}:{os.getcwd()}",

@@ -44,6 +44,7 @@ class AdsorbateRelaxWorkflow:
     model: str = None
     alias: str = ''
     job_name: str = "adsorbate relax"
+    mode_fe = "harmonic"
     
     def build(self):
         if self.structure is not None:
@@ -53,7 +54,7 @@ class AdsorbateRelaxWorkflow:
             load = load_surface(filename = self.filename)
             surface_structure = load.output
         add = adsorb(surface_structure, adsorbate = self.adsorbate, height=self.height, position=self.position)
-        relax = relax_ase(atoms=add.output, forcefield=self.forcefield, model=self.model, alias=self.alias)
+        relax = relax_ase(atoms=add.output, forcefield=self.forcefield, model=self.model, alias=self.alias, mode_fe=self.mode_fe)
         relax.name = self.job_name
         jobs = [add, relax] if load is None else [load, add, relax]
         return Flow(jobs), relax
