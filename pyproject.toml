@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ase-flow"
-version = "0.1"
+version = "0.2"
 description = "ASE workflows"
 authors = [
     { name = "Wei", email = "wei.chen@uclouvain.be" }
