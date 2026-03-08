@@ -76,7 +76,7 @@ def relax_ase(
     opt = PreconLBFGS(atoms, logfile="opt.log")
     traj = Trajectory("opt.traj", "w", atoms)
     opt.attach(traj.write, interval=10)
-    opt.run(fmax=0.0095)
+    opt.run(fmax=0.002)
     write("CONTCAR", atoms)
 
     initial_structure = AseAtomsAdaptor.get_structure(initial_atoms)

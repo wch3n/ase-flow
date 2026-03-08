@@ -11,6 +11,7 @@ def calc_free_energy(
     geometry="nonlinear",
     symmetrynumber=2,
     spin=0,
+    correction_only=False,
 ):
     vib = Vibrations(atoms)
     vib.run()

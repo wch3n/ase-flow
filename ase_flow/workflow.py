@@ -15,6 +15,15 @@ def load_surface(filename="POSCAR"):
     structure = Poscar.from_file(filename).structure
     return structure
 
+@job
+def displace_atoms(structure, displace_cart):
+    for i in displace_cart:
+        structure.translate_sites(
+            [int(i)],
+            displace_cart[i],
+            frac_coords=False,
+        )
+    return structure
 
 @job
 def adsorb(surface_structure, adsorbate, rotation, height, position):
@@ -84,7 +93,7 @@ class RelaxWorkflow:
             pressure=self.pressure,
             geometry=self.geometry,
             symmetrynumber=self.symmetrynumber,
-            spin=self.spin
+            spin=self.spin,
         )
         relax.name = self.job_name
         jobs = [relax] if load is None else [load, relax]
@@ -149,8 +158,9 @@ class ProtonationRelaxWorkflow:
     model: str = None
     alias: str = ""
     free_energy: bool = True
-    mode_fe = "harmonic"
+    mode_fe: str = "harmonic"
     job_name: str = "adsorbate relax"
+    displace_cart: dict = None
 
     def build(self):
         if self.structure is not None:
@@ -159,12 +169,17 @@ class ProtonationRelaxWorkflow:
         else:
             load = load_surface(filename=self.filename)
             surface_structure = load.output
+        if self.displace_cart is not None:
+            displace = displace_atoms(surface_structure, self.displace_cart)
+            surface_structure = displace.output
+
         add = protonate(
             surface_structure,
             anchor_site=self.anchor_site,
             height=self.height,
             offset=self.offset,
         )
+
         relax = relax_ase(
             atoms=add.output,
             fix_below=self.fix_below,
@@ -172,11 +187,17 @@ class ProtonationRelaxWorkflow:
             model=self.model,
             alias=self.alias,
             free_energy=self.free_energy,
-            mode_fe=self.mode_fe
+            mode_fe=self.mode_fe,
         )
+        jobs = []
+        if load is not None:
+            jobs.append(load)
+        if self.displace_cart is not None:
+            jobs.append(displace)
+        jobs.extend([add, relax])
         relax.name = self.job_name
-        jobs = [add, relax] if load is None else [load, add, relax]
         return Flow(jobs), relax
+
 
 @dataclass
 class DesorbRelaxWorkflow:
@@ -200,8 +221,7 @@ class DesorbRelaxWorkflow:
             load = load_surface(filename=self.filename)
             surface_structure = load.output
         desorb = remove_indices(
-            surface_structure,
-            indices_to_remove=self.indices_to_remove
+            surface_structure, indices_to_remove=self.indices_to_remove
         )
         relax = relax_ase(
             atoms=desorb.output,

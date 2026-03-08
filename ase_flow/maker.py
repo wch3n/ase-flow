@@ -47,15 +47,18 @@ user_kpoints_settings = {"reciprocal_density": 250}
 
 model_default = "/gpfs/scratch/acad/htbase/wchen/mxene/mlip/pbe-d3/Ti_C_O_H_F_Cu/models/ft-omat_0-00_stagetwo.model"
 
-def molecule_relax(molecule_name, temperature=298.15, pressure=101325, geometry="linear", symmetrynumber=2, spin=0, job_name="molecule relax", model=model_default):
-    mol = molecule(molecule_name)
+def molecule_relax(molecule_name=None, structure_file=None, temperature=298.15, pressure=101325, geometry="linear", symmetrynumber=2, spin=0, job_name="molecule relax", model=model_default):
+    if structure_file is not None:
+        mol = read(structure_file)
+    else:
+        mol = molecule(molecule_name)
     mol.center(vacuum=10.0)
     mol.set_pbc(True)
     flow_relax, relax_job = RelaxWorkflow(
         structure=AseAtomsAdaptor.get_structure(mol),
         temperature=temperature,
         pressure=pressure,
-        geometry="linear",
+        geometry=geometry,
         symmetrynumber=symmetrynumber,
         spin=spin,
         mode_fe="ideal",
@@ -93,10 +96,15 @@ def vasp_relax():
     flow = Flow(job_static)
     lpad.add_wf(flow_to_workflow(flow))
 
-def adsorbate_relax(topdir, job_name="adsorbate relax", model=model_default):
-    # adsorbate 
+def adsorbate_relax(rel_path, topdir, job_name="adsorbate relax", model=model_default):
+    # adsorbate
+    slab_path = (
+        join(topdir, rel_path, 'calc', 'slab', 'CONTCAR')
+        if rel_path
+        else join(topdir, 'calc', 'slab', 'CONTCAR')
+    )
     flow_adsorb, relax_job = AdsorbateRelaxWorkflow(
-        filename=join(topdir,'calc/slab/CONTCAR'),
+        filename=slab_path,
         adsorbate='CO2',
         rotation={'x': 90, 'y':0, 'z':0},
         forcefield = 'mace',
@@ -123,25 +131,26 @@ def protonation_from_job(relax_job, model=model_default):
     flow = Flow(flow_proto)
     lpad.add_wf(flow_to_workflow(flow))
 
-def protonation_relax(rel_path, topdir, anchor_site, height=1.0, offset=(0,0), model=model_default):
+def protonation_relax(rel_path, topdir, anchor_site, height=1.0, offset=(0,0), model=model_default, displace_cart=None):
     # protonation 1
     flow_proto, _ = ProtonationRelaxWorkflow(
-        filename = join(topdir, rel_path),
+        filename = join(topdir, rel_path, 'calc', 'CONTCAR'),
         forcefield = 'mace',
         model = model,
         anchor_site = anchor_site,
         height = height,
         offset = offset,
         free_energy = True,
-        job_name = 'adsorbate relax'
+        job_name = 'adsorbate relax',
+        displace_cart = displace_cart,
     ).build()
 
     flow = Flow(flow_proto)
     lpad.add_wf(flow_to_workflow(flow))
     
-def desorption_relax(rel_path, indices, model=model_default):
+def desorption_relax(rel_path, topdir, indices, model=model_default):
     flow_desorb, _ = DesorbRelaxWorkflow(
-        filename = join(topdir, rel_path),
+        filename = join(topdir, rel_path, 'calc', 'CONTCAR'),
         indices_to_remove = indices,
         forcefield = 'mace',
         model = model,
@@ -157,5 +166,5 @@ if __name__ == '__main__':
     molecule_relax('CO', temperature=298.15, pressure=101325, geometry='linear', symmetrynumber=2, spin=0)
     #substrate_relax('slab/POSCAR', job_name='substrate relax')
     #substrate_relax('co2/POSCAR', job_name="adsorbate relax")
-    #protonation_relax('ch3o/calc/launcher_2025-06-05-10-18-52-681095/CONTCAR', anchor_site=167, height=1.0, offset=(0.0,0.0))
-    #desorption_relax('ch3o-h/calc/launcher_2025-06-05-11-32-08-283160/CONTCAR', indices=[273,274,215,275,276,277])
+    #protonation_relax('ch3o', anchor_site=167, height=1.0, offset=(0.0,0.0))
+    #desorption_relax('ch3o-h', indices=[273,274,215,275,276,277])
