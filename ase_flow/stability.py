@@ -65,13 +65,27 @@ def _infer_mixing_elements_from_references(
     return tuple(varying)
 
 
+def _mixing_total(
+    reduced_composition: Composition,
+    mixing_elements: Iterable[str],
+) -> float:
+    total = float(sum(_mixing_amounts(reduced_composition, mixing_elements).values()))
+    if total <= 0.0:
+        raise ValueError(
+            f"Reduced composition {reduced_composition.reduced_formula} does not contain "
+            f"mixing elements {tuple(mixing_elements)}."
+        )
+    return total
+
+
 def _scaffold_signature(
     reduced_composition: Composition,
     mixing_elements: Iterable[str],
 ) -> dict:
+    mixing_total = _mixing_total(reduced_composition, mixing_elements)
     mixing_set = set(mixing_elements)
     return {
-        el: float(amount)
+        el: round(float(amount) / mixing_total, 12)
         for el, amount in reduced_composition.get_el_amt_dict().items()
         if el not in mixing_set and amount > 0.0
     }
@@ -90,12 +104,7 @@ def _mixing_fractions(
     mixing_elements: Iterable[str],
 ) -> dict:
     amounts = _mixing_amounts(reduced_composition, mixing_elements)
-    total = float(sum(amounts.values()))
-    if total <= 0.0:
-        raise ValueError(
-            f"Reduced composition {reduced_composition.reduced_formula} does not contain "
-            f"mixing elements {tuple(mixing_elements)}."
-        )
+    total = _mixing_total(reduced_composition, mixing_elements)
     return {el: amounts[el] / total for el in mixing_elements}
 
 
@@ -145,23 +154,33 @@ def analyze_endpoint_stability(
     reduced_b, factor_b = _reduced_formula_factor(endmember_b_result)
     reduced_alloy, factor_alloy = _reduced_formula_factor(alloy_result)
 
+    signature_a = _scaffold_signature(reduced_a, (element_a, element_b))
+    signature_b = _scaffold_signature(reduced_b, (element_a, element_b))
+    if signature_a != signature_b:
+        raise ValueError(
+            "Endpoint entries are not on the same fixed scaffold. "
+            f"Expected scaffold {signature_a}, got {signature_b}."
+        )
+
     energy_a_pf = float(_result_payload(endmember_a_result)[key_a]) / factor_a
     energy_b_pf = float(_result_payload(endmember_b_result)[key_b]) / factor_b
     energy_alloy_pf = float(_result_payload(alloy_result)[key_alloy]) / factor_alloy
 
-    reduced_alloy_mixing_total = float(
-        reduced_alloy.get_el_amt_dict().get(element_a, 0.0)
-        + reduced_alloy.get_el_amt_dict().get(element_b, 0.0)
-    )
-    if reduced_alloy_mixing_total <= 0.0:
-        raise ValueError(
-            f"Alloy reduced composition does not contain mixing elements {element_a}, {element_b}."
-        )
+    mixing_total_a = _mixing_total(reduced_a, (element_a, element_b))
+    mixing_total_b = _mixing_total(reduced_b, (element_a, element_b))
+    reduced_alloy_mixing_total = _mixing_total(reduced_alloy, (element_a, element_b))
+    energy_a_per_mixing_site = energy_a_pf / mixing_total_a
+    energy_b_per_mixing_site = energy_b_pf / mixing_total_b
+    energy_alloy_per_mixing_site = energy_alloy_pf / reduced_alloy_mixing_total
     x_b = float(reduced_alloy.get_el_amt_dict().get(element_b, 0.0)) / reduced_alloy_mixing_total
     x_a = 1.0 - x_b
 
-    reference_pf = x_a * energy_a_pf + x_b * energy_b_pf
+    reference_per_mixing_site = (
+        x_a * energy_a_per_mixing_site + x_b * energy_b_per_mixing_site
+    )
+    reference_pf = reference_per_mixing_site * reduced_alloy_mixing_total
     delta_pf = energy_alloy_pf - reference_pf
+    delta_per_mixing_site = energy_alloy_per_mixing_site - reference_per_mixing_site
 
     reduced_alloy_atoms = float(sum(reduced_alloy.get_el_amt_dict().values()))
     delta_per_atom = delta_pf / reduced_alloy_atoms if reduced_alloy_atoms > 0.0 else float("nan")
@@ -175,24 +194,33 @@ def analyze_endpoint_stability(
             "formula": endmember_a_result["formula_pretty"],
             "reduced_formula": reduced_a.reduced_formula,
             "formula_units": factor_a,
+            "mixing_sites_per_reduced_formula": mixing_total_a,
             "energy_per_reduced_formula": energy_a_pf,
+            "energy_per_mixing_site": energy_a_per_mixing_site,
         },
         "endpoint_b": {
             "formula": endmember_b_result["formula_pretty"],
             "reduced_formula": reduced_b.reduced_formula,
             "formula_units": factor_b,
+            "mixing_sites_per_reduced_formula": mixing_total_b,
             "energy_per_reduced_formula": energy_b_pf,
+            "energy_per_mixing_site": energy_b_per_mixing_site,
         },
         "alloy": {
             "formula": alloy_result["formula_pretty"],
             "reduced_formula": reduced_alloy.reduced_formula,
             "formula_units": factor_alloy,
+            "mixing_sites_per_reduced_formula": reduced_alloy_mixing_total,
             "energy_per_reduced_formula": energy_alloy_pf,
+            "energy_per_mixing_site": energy_alloy_per_mixing_site,
             "fraction_" + element_a: x_a,
             "fraction_" + element_b: x_b,
         },
+        "reference_scaffold_signature": signature_a,
         "reference_energy_per_reduced_formula": reference_pf,
+        "reference_energy_per_mixing_site": reference_per_mixing_site,
         "delta_mix_per_reduced_formula": delta_pf,
+        "delta_mix_per_mixing_site": delta_per_mixing_site,
         "delta_mix_per_atom": delta_per_atom,
         "stable_against_endmembers": bool(delta_pf <= 0.0),
     }
@@ -234,17 +262,21 @@ def analyze_reference_stability(
 
         pure_element = _reference_pure_element(reduced_comp, mixing_elements)
         energy_per_reduced_formula = float(_result_payload(result)[key]) / factor
+        mixing_total = _mixing_total(reduced_comp, mixing_elements)
+        energy_per_mixing_site = energy_per_reduced_formula / mixing_total
         if pure_element in reference_energy_map:
             raise ValueError(f"Duplicate reference entry for mixing element {pure_element}.")
-        reference_energy_map[pure_element] = energy_per_reduced_formula
+        reference_energy_map[pure_element] = energy_per_mixing_site
 
         entry = {
             "formula": result["formula_pretty"],
             "reduced_formula": reduced_comp.reduced_formula,
             "formula_units": factor,
+            "mixing_sites_per_reduced_formula": mixing_total,
             "pure_mixing_element": pure_element,
             "energy_key": key,
             "energy_per_reduced_formula": energy_per_reduced_formula,
+            "energy_per_mixing_site": energy_per_mixing_site,
         }
         entry.update(
             {f"fraction_{el}": value for el, value in _mixing_fractions(reduced_comp, mixing_elements).items()}
@@ -269,20 +301,28 @@ def analyze_reference_stability(
             )
 
         energy_per_reduced_formula = float(_result_payload(result)[key]) / factor
+        mixing_total = _mixing_total(reduced_comp, mixing_elements)
+        energy_per_mixing_site = energy_per_reduced_formula / mixing_total
         fractions = _mixing_fractions(reduced_comp, mixing_elements)
-        reference_energy = sum(
+        reference_energy_per_mixing_site = sum(
             fractions[el] * reference_energy_map[el] for el in mixing_elements
         )
+        reference_energy = reference_energy_per_mixing_site * mixing_total
         delta_pf = energy_per_reduced_formula - reference_energy
+        delta_per_mixing_site = energy_per_mixing_site - reference_energy_per_mixing_site
         reduced_atoms = float(sum(reduced_comp.get_el_amt_dict().values()))
         alloy_entry = {
             "formula": result["formula_pretty"],
             "reduced_formula": reduced_comp.reduced_formula,
             "formula_units": factor,
+            "mixing_sites_per_reduced_formula": mixing_total,
             "energy_key": key,
             "energy_per_reduced_formula": energy_per_reduced_formula,
+            "energy_per_mixing_site": energy_per_mixing_site,
             "reference_energy_per_reduced_formula": reference_energy,
+            "reference_energy_per_mixing_site": reference_energy_per_mixing_site,
             "delta_mix_per_reduced_formula": delta_pf,
+            "delta_mix_per_mixing_site": delta_per_mixing_site,
             "delta_mix_per_atom": (
                 delta_pf / reduced_atoms if reduced_atoms > 0.0 else float("nan")
             ),
@@ -293,6 +333,7 @@ def analyze_reference_stability(
 
     return {
         "mixing_elements": list(mixing_elements),
+        "reference_scaffold_signature": scaffold_signature,
         "reference_entries": reference_entries,
         "alloys": alloy_entries,
     }
